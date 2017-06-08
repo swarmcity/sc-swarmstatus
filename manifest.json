@@ -1,0 +1,6 @@
+{
+  "name": "sc-swarmstatus",
+  "short_name": "sc-swarmstatus",
+  "start_url": "/",
+  "display": "standalone"
+}

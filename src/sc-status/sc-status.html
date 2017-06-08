@@ -1,0 +1,235 @@
+<link rel="import" href="../../bower_components/polymer/polymer.html">
+<link rel="import" href="../../bower_components/iron-ajax/iron-ajax.html">
+
+<script src="../../bower_components/web3/dist/web3.js"></script>
+
+
+<dom-module id="sc-status">
+  <template>
+    <iron-ajax
+      id="ref1"
+      url="https://api.blockcypher.com/v1/eth/main"
+      on-response="blockcypherhandler"
+      on-error="log"
+      auto>
+    </iron-ajax>
+    <iron-ajax
+      id="ref2"
+      url="https://api.etherscan.io/api?module=proxy&action=eth_blockNumber"
+      on-response="etherscanhandler"
+      on-error="log"      
+      auto>
+    </iron-ajax>
+    <style>
+      :host {
+        display: block;
+      }
+    </style>
+    <h2>Ethereum info</h2>
+    <template is="dom-if" if="{{localhost}}">
+    on localhost
+    </template>
+    <p>Last Update: {{ethlastupdate}}</p>
+    <h1>Reference heights</h1>
+    <template is="dom-repeat" items="{{heights}}">
+      <li>{{item.provider}} {{item.height}}</li>
+    </template>
+    <p>highest block found: {{highestblock}}</p>
+    <template is="dom-repeat" items="{{referencenodes}}" filter="hasblock" observer="block">
+      REF {{item.name}} at block {{item.block}}
+    </template>
+    <h1>Our nodes</h1>
+    <template is="dom-repeat" items="{{web3list}}">
+      <li>{{item.name}} ({{item.host}}) 
+      <template is="dom-if" if="{{item.updating}}">UPDATING...
+      </template>
+      <template is="dom-if" if="!{{item.updating}}">is at block {{item.block}} ({{_checkheight(highestblock,item.block)}}) peerCount={{item.peercount}}
+      </template>
+      </li>
+    </template>
+
+  </template>
+
+  <script>
+    Polymer({
+
+      is: 'sc-status',
+
+      properties: {
+        nodes: {
+          type: Array,
+            value: [ {
+              name: 'Parity pool',
+              url: 'https://ethpool.swarm.city/'
+            }, {
+              name: 'Old ETH (Geth) pool',
+              url: 'https://eth.swarm.city/'
+            },{
+              name: 'geth node 1',
+              url: 'http://ec2-52-34-81-160.us-west-2.compute.amazonaws.com:8545/',
+              onlylocalhost: true
+            },{
+              name: 'geth node 2',
+              url: 'http://ec2-34-209-106-212.us-west-2.compute.amazonaws.com:8545/',
+              onlylocalhost: true
+            }, {
+              name: 'Parity node 1',
+              url: 'http://ec2-52-11-115-160.us-west-2.compute.amazonaws.com:8545/',
+              onlylocalhost: true
+            },{
+              name: 'Parity node 2',
+              url: 'http://ec2-34-210-119-182.us-west-2.compute.amazonaws.com:8545/',
+              onlylocalhost: true
+            }
+
+
+            ],
+        },
+        referencenodes: {
+          type: Array,
+            value: [{
+              name: 'Infura',
+              url: 'https://ethpool.swarm.city/'
+            }],
+        },
+      },
+
+      ready: function(){
+        this.heights = [];
+        if (location.hostname === "localhost" || location.hostname === "127.0.0.1" || location.hostname === "") {
+          this.localhost = true;
+        }else{
+          this.localhost = false;
+        }
+      },
+
+      hasblock: function(b){
+        return (b.block);
+      },
+      log: function(e){
+        console.log(e);
+      },
+
+      blockcypherhandler: function(e) {
+        //try{
+          var r = e.detail.response;
+          this.storeheight('blockcypher',r.height);
+//          this.height = r.height;          
+        //}
+      },
+
+      etherscanhandler: function(e) {
+        //debugger;
+        //var r = e.detail.response;
+        this.storeheight('etherscan',web3.toDecimal(e.detail.response.result));
+        //this.height = r.height;
+      },
+
+      storeheight: function(provider, height) {
+        var d = {
+          provider: provider,
+          height: height
+        };
+
+        var index = this.heights.findIndex(function(item) {
+          return item.provider === d.provider;
+        });
+        if (index > -1) {
+          this.splice('heights', index, 1, d);
+        } else {
+          this.push('heights', d);
+        }
+
+        if (!this.highestblock || this.highestblock < d.height){
+          this.highestblock = d.height;
+        }
+      },
+
+      _checkheight: function(targetheight,nodeheight){
+        if (nodeheight > targetheight-2){
+          return('height OK');
+        }else{
+         return((targetheight - nodeheight) + ' blocks behind');
+        }
+      },
+
+      attached: function() {
+
+        this.web3list = [];
+        var self = this;
+        this.nodes.forEach(function(currentnode) {
+
+          if (!self.localhost && currentnode.onlylocalhost){
+            console.log('skipping localhost-only node',currentnode.name);
+          }else{
+
+            var web3 = new Web3(new Web3.providers.HttpProvider(currentnode.url));
+            console.log('node', currentnode.name, 'added');
+
+            var nodeinfo = {
+              name: currentnode.name,
+              host: currentnode.url,
+              web3: web3,
+              updating: false
+            };
+
+            nodeinfo.update = function updateblockheight() {
+              nodeinfo.updating = true;
+              web3.eth.getBlockNumber(function(error, result) {
+                if (error) {
+                  console.log(error);
+                }
+                nodeinfo.block = result;
+                var index = self.web3list.indexOf(nodeinfo);
+                self.notifyPath('web3list.#' + index + '.block');
+                nodeinfo.updating = false;
+              });
+
+              web3.net.getPeerCount(function(error, peerCount) {
+                if (error) {
+                  console.log(error);
+                }
+                nodeinfo.peercount = peerCount;
+                var index = self.web3list.indexOf(nodeinfo);
+                self.notifyPath('web3list.#' + index + '.peercount');
+                nodeinfo.updating = false;
+              });
+
+              self.ethlastupdate = new Date();
+            }
+            self.push('web3list', nodeinfo);
+          }
+        });
+
+        this.referencenodes.forEach(function(currentreferencenode) {
+          var web3 = new Web3(new Web3.providers.HttpProvider(currentreferencenode.url));
+          web3.eth.filter('latest').watch(function(error, result) {
+            // web3.eth.getBlockNumber(function(error, result) {
+            //   if (error) {
+            //     console.log(error);
+            //   }
+            //   currentreferencenode.block = result;
+            // });
+
+            self.web3list.forEach(function(currentnode) {
+              currentnode.update();
+            });
+            self.$.ref1.params = {
+              date: Date.now()
+            };
+            self.$.ref2.params = {
+              date: Date.now()
+            };
+            var index = self.referencenodes.indexOf(currentreferencenode);
+            self.notifyPath('referencenodes.#' + index + '.block');
+
+          });
+        });
+
+
+
+      }
+
+    });
+  </script>
+</dom-module>
